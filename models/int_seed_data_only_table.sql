@@ -2,7 +2,7 @@
 
 with source as (
 
-    select * from {{ ref('stg_seed_sample_Data') }}
+    select * from {{ ref('stg_seed_sample_data') }}
 
 ),
 
