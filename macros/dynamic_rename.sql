@@ -1,31 +1,6 @@
-# SQL Dynamic Rename Columns dbt Macro
+-- Macro to dynamically rename a sql table with a rename reference table.
+-- The structure of the rename table should be two columns with a row for each column to be renamed. One column for the original name and one column for the new name.
 
-## CONFIGURED FOR SNOWFLAKE
-
-This macro was not intended to be deployed to production environments without robust testing and review. It was created as a side-project to get more comfortable with using JINJA within dbt.
-
-## Use Cases
-
-This macro is designed to be used in all instances where you want to rename columns of a table based on a mapping table of the structure new_header \| header\.
-
-Some example use cases include when header information is nested across two rows and seeps into the rows of data. Headers being read in as data - with some reshaping we can correct this. Alternatively if you wanted to add a standard prefix to all column headers this macro could be used to save writing out long sql queries for very wide tables.
-
-Example of Nested Headers:
-![Nested Headers](image.png)
-
-In this example Interaction With is the header for column E, whereas F,G and H have no header and take the default value. In the next row (which will be parsed as a data-row) we have supplementary header info detailing who the interaction is with. Ideally this would be Interaction_With_Manager for column E Interaction_With_Coworker for column F etc.
-
-## Pre-Requisites
-
-The macro requires the user to provide the name of a model that is to be renamed along with the name of a model that returns a mapping table for the renaming with a row for each column.
-
-Example of the Structure expected for the mapping table (Column order matters for the Macro!)
-
-![Example Mapping Table](image-1.png)
-
-## Macro Script
-
-```
 {% macro dynamic_rename(rename_table, source_relation) %}
 
     {%- if execute -%}
@@ -43,7 +18,7 @@ Example of the Structure expected for the mapping table (Column order matters fo
     {#- run the query and then populate a list of mappings -#}
     {%- set results = run_query(rename_table_call) -%}
     {{- log("results: " ~ results, info=True) -}}
-
+    
     {#- empty mappings dictionary to populate with a for loop -#}
     {#- Ensure results are not empty -#}
     {%- if results is not none and results.rows|length > 0 -%}
@@ -69,7 +44,7 @@ Example of the Structure expected for the mapping table (Column order matters fo
 
 {#- Section 2: Get the column names for the specified table using the adapter object (this avoids a macro dependency on dbt utils by building the functionality into the macro) -#}
 
-    {#- get the columns from the table to be renamed -#}
+    {#- get the columns from the table to be renamed -#} 
     {{- log("source_relation: " ~ source_relation, info=True) -}}
 
     {%- set columns = adapter.get_columns_in_relation(ref(source_relation)) -%}
@@ -96,7 +71,7 @@ Example of the Structure expected for the mapping table (Column order matters fo
 
             {{- log("Keeping column: " ~ col_name, info=True) -}}
             {%- do rename_sql.append(col_name) -%}
-
+            
 
         {%- endif -%}
 
@@ -110,9 +85,8 @@ Example of the Structure expected for the mapping table (Column order matters fo
 {%- else -%}
 
 {#- dummy sql for parsing phase -#}
-select 1
+select 1 
 
 {%- endif -%}
 
 {% endmacro %}
-```
