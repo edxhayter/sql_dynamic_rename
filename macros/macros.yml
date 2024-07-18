@@ -1,0 +1,12 @@
+version: 2
+
+macros:
+  - name: dynamic_rename
+    description: Renames the column headers of a SQL Table dynamically based on a provided mapping table.
+    arguments:
+      - name: rename_table
+        type: string
+        description: mapping table of the structure new_header | original header
+      - name: source_relation
+        type: string
+        description: name of the table to be renamed by the mapping table.
