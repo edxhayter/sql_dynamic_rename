@@ -116,3 +116,209 @@ select 1
 
 {% endmacro %}
 ```
+
+## Example Use
+
+If we were to use the macro on the example use case from earlier, a worked example would look like so:
+
+Given the source data (in this case a seed) the start point is staging that data with a standard sql query (I used this as a chance to add a row number in order to help split off the section of the table that needed to be parsed for headers from where the data actually begins).
+
+```sql
+-- read in the seed data (rememnber to dbt seed the source data in if you want to walk through the included example.)
+
+with source as (
+
+    select
+
+        *
+
+    from {{ ref('rename_sample_data') }}
+
+),
+
+-- add a source row number as this is important in lots of cases for using a sql query to create a mapping table for the headers.
+
+transformed as (
+
+ select
+
+        *,
+        row_number() over (order by null) as row_num
+
+from source
+
+)
+
+select * from transformed
+```
+
+The main pre-requisite for using this macro is providing a model that returns a mapping table for headers for guidance on an approach to doing this the model below is one such example:
+
+```sql
+-- This is an example query for returning a mapping table for renaming columns and addressing the nested header issue.
+
+-- unpivot the staged model to get header name in the rows In this instance the excluded columns are not pivotted and .
+
+with unpivot as (
+
+    {{ dbt_utils.unpivot(relation=ref('stg_seed_sample_data'), cast_to='varchar', exclude=['employee', 'row_num'], field_name = 'header', value_name = 'subheader') }}
+
+),
+
+-- only take row 1
+original_headers as(
+
+    select
+
+        row_number() over (order by null) as col_num,
+        header,
+
+    from unpivot
+
+    where row_num = 1
+
+),
+
+-- Prep the headers that need to be renamed, in this case they are all length(1) so are changed to null so their info can be copied down and concatenated with the nested header value.
+headers as (
+
+    select
+
+        row_num as rn,
+        case
+            when length(header) = 1 then null
+            else header
+        end as header,
+        subheader
+
+    from unpivot
+
+    where row_num = 1
+
+),
+
+-- copy down header value using last_value
+new_headers as (
+    select
+
+
+        row_number() over (order by null) as col_num,
+        case
+            when subheader is null then header
+            else coalesce(header, last_value(header) ignore nulls over (order by rn rows between unbounded preceding and current row)) || '_' || coalesce(subheader, '')
+        end as new_header,
+
+
+    from headers
+
+),
+
+-- sql databases do not like special characters in the table name so replace these with '_'
+
+rename_table as (
+
+    select
+
+        upper(regexp_replace(h.new_header, '[^A-Za-z0-9_]', '_')) as new_header,
+
+        original_headers.header
+
+    from new_headers h
+    inner join original_headers on h.col_num = original_headers.col_num
+
+)
+
+-- end result is a row for every column and THE ORDER IS IMPORTANT, we have new_header followed by original header.
+
+select * from rename_table
+```
+
+The other necessary intermediate model is the table with just the data rows included. In this instance it was as simple as a where clause to remove row 1 but in other instances it might be more complicated.
+
+The final thing to demonstrate is the application of the macro in the .sql file as a dbt model compared to how the model is compiled which I have gathered from the target>compile subdirectory.
+
+The model looks like so:
+
+```sql
+-- as the rename macro has references back to models, we might have problems with unclear references.
+-- this can be avoided two ways, in this version, within the model itself before calling the macro we have added CTEs that refer to the two proceeding models that are needed in the macro. This ensures that this model and the macro within execute after the first two models (otherwise the macro within this model will try and execute before the models are created)
+
+-- the other approach is to tell dbt with a comment statement at the start of the model that specifies dependencies. Like so
+-- depends_on: {{ ref('int_seed_data_only_table') }}
+
+with data as (
+
+    select * from {{ ref('int_seed_data_only_table') }}
+
+),
+
+header_mapping as (
+
+    select * from {{ ref('int_seed_header_mapping') }}
+
+),
+
+-- the macro returns a list of column_name1 as new_column_name1, column_name2 as new_column_name2 etc. that are then wrapped in the model with a select and a from for the data that is to be renamed.
+
+renamed_table as (
+
+        select
+
+            {{ dynamic_rename('int_seed_header_mapping','int_seed_data_only_table') }}
+
+        from data
+
+)
+
+select * from renamed_table
+```
+
+This compiles as:
+
+```sql
+-- as the rename macro has references back to models, we might have problems with unclear references.
+-- this can be avoided two ways, in this version, within the model itself before calling the macro we have added CTEs that refer to the two proceeding models that are needed in the macro. This ensures that this model and the macro within execute after the first two models (otherwise the macro within this model will try and execute before the models are created)
+
+-- the other approach is to tell dbt with a comment statement at the start of the model that specifies dependencies. Like so
+-- depends_on: TIL_PORTFOLIO_PROJECTS.EH_SQL_DYNAMIC_RENAME.int_seed_data_only_table
+
+with data as (
+
+    select * from TIL_PORTFOLIO_PROJECTS.EH_SQL_DYNAMIC_RENAME.int_seed_data_only_table
+
+),
+
+header_mapping as (
+
+    select * from TIL_PORTFOLIO_PROJECTS.EH_SQL_DYNAMIC_RENAME.int_seed_header_mapping
+
+),
+
+-- the macro returns a list of column_name1 as new_column_name1, column_name2 as new_column_name2 etc. that are then wrapped in the model with a select and a from for the data that is to be renamed.
+
+renamed_table as (
+
+        select
+
+            EMPLOYEE,
+OBSERVATION_START_TIME as OBSERVATION_START_TIME,
+OBSERVATION_INTERVAL as OBSERVATION_INTERVAL,
+OBSERVATION_LENGTH_MINS as OBSERVATION_LENGTH_MINS,
+INTERACTION_WITH as INTERACTION_WITH_MANAGER,
+F as INTERACTION_WITH_COWORKER,
+G as INTERACTION_WITH_CUSTOMER,
+H as INTERACTION_WITH_NO_ONE,
+TASK_ENGAGEMENT as TASK_ENGAGEMENT_ON_TASK,
+J as TASK_ENGAGEMENT_OFF_TASK,
+MANAGER_PROXIMITY as MANAGER_PROXIMITY_NEXT_TO___2M_,
+L as MANAGER_PROXIMITY_CLOSE_TO___5M_,
+M as MANAGER_PROXIMITY_FURTHER__5M_,
+N as MANAGER_PROXIMITY_NA,
+ROW_NUM
+
+        from data
+
+)
+
+select * from renamed_table
+```
