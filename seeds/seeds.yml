@@ -1,0 +1,5 @@
+version: 2
+
+seeds:
+  - name: rename_sample_data
+    description: This is the sample file used in the repository to demo the tool. It has some nested headers that mean when it is loaded into the database some header values are included in the first row of data.
